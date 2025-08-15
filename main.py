@@ -18,8 +18,8 @@ EMAIL_SENDER = os.getenv('EMAIL_SENDER')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
 EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER', EMAIL_SENDER)
 TIMEZONE_STR = os.getenv('TIMEZONE', 'UTC')
-# This new version name will help us confirm our pipeline is fixed.
-AGENT_VERSION = "v2.4 (Prometheus - Final Pipeline Fix)"
+# This final version name will verify our ultimate permission fix.
+AGENT_VERSION = "v2.5 (Prometheus - The King's Decree)"
 COINGECKO_API = 'https://api.coingecko.com/api/v3'
 DAILY_REPORT_TIME = "09:00"
 MAX_PRICE = 1.0
