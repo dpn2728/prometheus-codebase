@@ -4,16 +4,22 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
+# This library is for writing to our GCS library.
+from google.cloud import storage
 
-# --- Global Status Variable (Our "Status Screen") ---
+# --- Global Status & Configuration ---
 AGENT_STATUS = "INITIALIZING"
+# We try to get the Project ID from the environment, which is standard in Google Cloud.
+PROJECT_ID = os.getenv("GCP_PROJECT", "project-nexus-final") 
+BUCKET_NAME = f"prometheus-data-library-{PROJECT_ID}"
 
 # --- Prometheus Core Configuration ---
 EMAIL_SENDER = os.getenv('EMAIL_SENDER')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
 EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER', EMAIL_SENDER)
 TIMEZONE_STR = os.getenv('TIMEZONE', 'UTC')
-AGENT_VERSION = "v2.0 (Prometheus - Status Enabled)"
+# This new version name will help us confirm our pipeline works.
+AGENT_VERSION = "v2.2 (Prometheus - Pipeline Verified)"
 COINGECKO_API = 'https://api.coingecko.com/api/v3'
 DAILY_REPORT_TIME = "09:00"
 MAX_PRICE = 1.0
@@ -22,28 +28,43 @@ MINIMUM_SCORE_THRESHOLD = 50
 
 def now_utc(): return datetime.now(timezone.utc)
 
-# --- All analysis functions (send_email, get_market_data, etc.) remain the same ---
+def save_analysis_to_gcs(data):
+    """Saves the daily analysis result to Google Cloud Storage."""
+    global AGENT_STATUS
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(BUCKET_NAME)
+        today = now_utc().strftime('%Y-%m-%d')
+        file_name = f"daily_analysis_{today}.json"
+        blob = bucket.blob(file_name)
+        
+        blob.upload_from_string(json.dumps(data, indent=2), content_type='application/json')
+        print(f"[{now_utc()}] PrometheusLog: Successfully saved {file_name} to GCS.")
+    except Exception as e:
+        AGENT_STATUS = f"ERROR: Failed to save analysis to GCS at {now_utc().isoformat()}"
+        print(f"[{now_utc()}] FATAL ERROR: Could not write to GCS bucket '{BUCKET_NAME}'. Error: {e}")
+
 def send_email(subject, html_body):
+    # This function remains the same.
     if not EMAIL_SENDER or not EMAIL_PASSWORD: return
     msg = MIMEMultipart('alternative'); msg['Subject'] = subject; msg['From'] = f"Project Prometheus <{EMAIL_SENDER}>"; msg['To'] = EMAIL_RECEIVER
     msg.attach(MIMEText(html_body, 'html', 'utf-8'))
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s: s.login(EMAIL_SENDER, EMAIL_PASSWORD); s.send_message(msg)
     except Exception as e:
-        global AGENT_STATUS
-        AGENT_STATUS = f"ERROR: Email failed at {now_utc().isoformat()}"
+        global AGENT_STATUS; AGENT_STATUS = f"ERROR: Email failed at {now_utc().isoformat()}"
 
 def get_market_data():
+    # This function remains the same.
     try:
         params = {'vs_currency': 'usd', 'order': 'market_cap_desc', 'per_page': CANDIDATE_COUNT, 'page': 1}
         r = requests.get(f"{COINGECKO_API}/coins/markets", params=params, timeout=20); r.raise_for_status()
         return [c for c in r.json() if c and c.get('current_price') and c.get('current_price') <= MAX_PRICE]
     except Exception as e:
-        global AGENT_STATUS
-        AGENT_STATUS = f"ERROR: CoinGecko fetch failed at {now_utc().isoformat()}"
-        return []
+        global AGENT_STATUS; AGENT_STATUS = f"ERROR: CoinGecko fetch failed at {now_utc().isoformat()}"; return []
 
 def analyze_social_sentiment(symbol, name):
+    # This function remains the same.
     try:
         query = f'"{name}" OR "{symbol}"'; after = int((now_utc() - timedelta(days=1)).timestamp())
         r = requests.get(f'https://api.pushshift.io/reddit/search/comment/?q={query}&after={after}&size=0&metadata=true', timeout=15)
@@ -51,6 +72,7 @@ def analyze_social_sentiment(symbol, name):
     except Exception: return 0
 
 def analyze_and_score(candidates):
+    # This function remains the same.
     scored_coins = []
     for coin in candidates:
         sentiment = analyze_social_sentiment(coin.get('symbol',''), coin.get('name',''))
@@ -67,12 +89,8 @@ def build_html_directive(coin):
     except Exception: local_tz = pytz.timezone('UTC')
     local_time = now_utc().astimezone(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
     price = coin['price']
-    catalyst_html = ""
-    if coin['score'] > 80:
-        catalyst_html = """<h3>🔴 URGENT: Catalyst Event Detected!</h3><table class="catalyst"><tr><th>Signal Source</th><th>Analysis</th></tr><tr><td>On-Chain Forensics (Simulated)</td><td>High-volume transfer to a suspected exchange wallet detected.</td></tr><tr><td>Social Graph Velocity (Simulated)</td><td>Activity spike in developer-related social circles.</td></tr><tr><td colspan="2" style="text-align:center;"><b>Conclusion: High probability of a Tier-2 exchange listing within 72 hours.</b></td></tr></table><hr>"""
-    html = f"""<html><head><style>body{{font-family:sans-serif;}} table{{width:100%; border-collapse:collapse;}} th,td{{padding:8px; border:1px solid #ddd;}}</style></head><body><h2>🔥 Project Prometheus - दैनिक अल्फा आदेश</h2><p><b>Date Issued:</b> {local_time} | <b>Version:</b> {AGENT_VERSION}</p><hr>{catalyst_html}<h3>🏆 Today's Alpha Pick: {coin['name']} ({coin['symbol'].upper()})</h3><table><tr><td><b>Price</b></td><td><b>${price:.6f}</b></td></tr><tr><td><b>Prometheus Score</b></td><td><b>{coin['score']:.2f} / 100</b></td></tr></table></body></html>"""
+    html = f"""<html><body><h2>🔥 Prometheus Alpha Directive</h2><p><b>Version:</b> {AGENT_VERSION}</p><p><b>Coin:</b> {coin['name']} ({coin['symbol'].upper()})</p><p><b>Score:</b> {coin['score']:.2f}</p></body></html>"""
     return html
-
 
 def prometheus_main_loop():
     global AGENT_STATUS
@@ -88,6 +106,7 @@ def prometheus_main_loop():
                 candidates = get_market_data()
                 if candidates:
                     scored_list = analyze_and_score(candidates)
+                    save_analysis_to_gcs(scored_list) # Save the full analysis
                     if scored_list and scored_list[0]['score'] > MINIMUM_SCORE_THRESHOLD:
                         best_coin = scored_list[0]
                         AGENT_STATUS = f"Analysis complete. Best coin: {best_coin['name']}. Sending directive."
@@ -95,27 +114,21 @@ def prometheus_main_loop():
                         subject = f"🔥 Prometheus Alpha Directive: {best_coin['name']}"
                         send_email(subject, report_html)
                     else:
-                        AGENT_STATUS = f"Analysis complete. No candidate met the minimum score of {MINIMUM_SCORE_THRESHOLD}. Directive withheld."
+                        AGENT_STATUS = f"Analysis complete. No candidate met minimum score. Directive withheld."
                 else:
-                    AGENT_STATUS = "Analysis complete. Market data synthesis returned no candidates."
-            
-            time.sleep(30) # Check time every 30 seconds
+                    AGENT_STATUS = "Analysis complete. No candidates from market data."
+            time.sleep(30)
         except Exception as e:
             AGENT_STATUS = f"FATAL ERROR in main loop: {e} at {now_utc().isoformat()}"
-            time.sleep(30) # Prevent fast crash loops
+            time.sleep(30)
 
 def run_health_check_server():
     class HealthCheckHandler(BaseHTTPRequestHandler):
         def do_GET(self):
-            self.send_response(200)
-            self.send_header('Content-type','text/plain')
-            self.end_headers()
-            # This will now show the LIVE status of our agent!
+            self.send_response(200); self.send_header('Content-type','text/plain'); self.end_headers()
             response_message = f"Prometheus Status: {AGENT_STATUS}"
             self.wfile.write(response_message.encode('utf-8'))
-    
-    port=int(os.getenv("PORT", 8080))
-    server = HTTPServer(('', port), HealthCheckHandler)
+    port=int(os.getenv("PORT", 8080)); server = HTTPServer(('', port), HealthCheckHandler)
     server.serve_forever()
 
 if __name__ == "__main__":
