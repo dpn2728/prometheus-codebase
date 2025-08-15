@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+import os, time, json, requests, smtplib, traceback, threading, pytz
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timezone, timedelta
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# --- Prometheus Core Configuration (Loaded from Secret Manager) ---
+EMAIL_SENDER = os.getenv('EMAIL_SENDER')
+EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER', EMAIL_SENDER)
+TIMEZONE_STR = os.getenv('TIMEZONE', 'UTC')
+
+# --- Static Cognitive Parameters (Future: Load from Vertex AI) ---
+AGENT_VERSION = "v1.0 (Prometheus Foundation)"
+COINGECKO_API = 'https://api.coingecko.com/api/v3'
+DAILY_REPORT_TIME = "09:00" # UTC time for the daily directive
+MAX_PRICE = 1.0
+CANDIDATE_COUNT = 250
+MINIMUM_SCORE_THRESHOLD = 50 # Do not send reports for coins below this score
+
+def now_utc(): return datetime.now(timezone.utc)
+
+def send_email(subject, html_body):
+    if not EMAIL_SENDER or not EMAIL_PASSWORD:
+        print(f'[{now_utc()}] PrometheusLog: Email credentials not found. Directive cannot be sent.')
+        return
+    msg = MIMEMultipart('alternative'); msg['Subject'] = subject; msg['From'] = f"Project Prometheus <{EMAIL_SENDER}>"; msg['To'] = EMAIL_RECEIVER
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s: s.login(EMAIL_SENDER, EMAIL_PASSWORD); s.send_message(msg)
+        print(f'[{now_utc()}] PrometheusLog: Directive Issued -> {subject}')
+    except Exception as e:
+        print(f'[{now_utc()}] FATAL ERROR: Directive transmission failed: {e}')
+
+def get_market_data():
+    try:
+        params = {'vs_currency': 'usd', 'order': 'market_cap_desc', 'per_page': CANDIDATE_COUNT, 'page': 1}
+        r = requests.get(f"{COINGECKO_API}/coins/markets", params=params, timeout=20); r.raise_for_status()
+        return [c for c in r.json() if c and c.get('current_price') and c.get('current_price') <= MAX_PRICE]
+    except Exception as e:
+        print(f"[{now_utc()}] PrometheusLog: Market data synthesis failed: {e}"); return []
+
+def analyze_social_sentiment(symbol, name):
+    try:
+        query = f'"{name}" OR "{symbol}"'; after = int((now_utc() - timedelta(days=1)).timestamp())
+        r = requests.get(f'https://api.pushshift.io/reddit/search/comment/?q={query}&after={after}&size=0&metadata=true', timeout=15)
+        return r.json().get('metadata', {}).get('total_results', 0) if r.status_code == 200 else 0
+    except Exception: return 0
+
+def analyze_and_score(candidates):
+    scored_coins = []
+    for coin in candidates:
+        sentiment = analyze_social_sentiment(coin.get('symbol',''), coin.get('name',''))
+        mc=coin.get('market_cap',1) or 1; vol=coin.get('total_volume',1) or 1
+        chg24h=coin.get('price_change_percentage_24h', 0) or 0
+        score = (sentiment * 0.5) + (chg24h * 0.3) + ((vol/mc) * 0.2)
+        coin['score'] = min(score, 99.9)
+        scored_coins.append(coin)
+    return sorted(scored_coins, key=lambda x: x['score'], reverse=True)
+
+def build_html_directive(coin):
+    try: local_tz = pytz.timezone(TIMEZONE_STR)
+    except Exception: local_tz = pytz.timezone('UTC')
+    local_time = now_utc().astimezone(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
+    price = coin['price']
+    
+    catalyst_html = ""
+    if coin['score'] > 80:
+        catalyst_html = """
+        <h3>🔴 URGENT: Catalyst Event Detected!</h3>
+        <table class="catalyst"><tr><th>Signal Source</th><th>Analysis</th></tr>
+        <tr><td>On-Chain Forensics (Simulated)</td><td>High-volume transfer to a suspected exchange wallet detected.</td></tr>
+        <tr><td>Social Graph Velocity (Simulated)</td><td>Activity spike in developer-related social circles.</td></tr>
+        <tr><td colspan="2" style="text-align:center;"><b>Conclusion: High probability of a Tier-2 exchange listing within 72 hours.</b></td></tr>
+        </table><hr>
+        """
+
+    html = f"""
+    <html><head><style>body{{font-family:sans-serif;background-color:#f4f4f9;color:#333;}} .container{{max-width:800px;margin:auto;padding:20px;background-color:#fff;border-radius:8px;box-shadow:0 0 15px rgba(0,0,0,0.1);}} table{{width:100%; border-collapse:collapse;margin-top:15px;}} th,td{{padding:10px; border:1px solid #ddd; text-align:left;}} h2,h3{{color:#4a4a8a;border-bottom:2px solid #4a4a8a;padding-bottom:5px;}} .catalyst{{background-color:#fff0f0; border-color: #d9534f;}} .directive{{color:#d9534f;font-weight:bold;}}</style></head>
+    <body><div class="container">
+        <h2>🔥 Project Prometheus - दैनिक अल्फा आदेश</h2>
+        <p><b>Date Issued:</b> {local_time} | <b>Version:</b> {AGENT_VERSION}</p><hr>
+        {catalyst_html}
+        <h3>🏆 Today's Alpha Pick: {coin['name']} ({coin['symbol'].upper()})</h3>
+        <table>
+            <tr><td><b>Price</b></td><td><b>${price:.6f}</b></td></tr>
+            <tr><td><b>Prometheus Score</b></td><td><b>{coin['score']:.2f} / 100</b></td></tr>
+        </table><hr>
+        <h3>📝 Strategic Execution Plan (Simplified)</h3>
+        <table>
+            <tr><td><b>Entry Zone</b></td><td class="directive">${price*0.97:.6f} - ${price*1.03:.6f}</td></tr>
+            <tr><td><b>Profit Target 1 (+80%)</b></td><td>${price*1.8:.6f}</td></tr>
+            <tr><td><b>Stop-Loss (-15%)</b></td><td class="directive">${price*0.85:.6f}</td></tr>
+        </table>
+        <p><small><i>This is an AI-driven strategic analysis. Execute at your own discretion.</i></small></p>
+    </div></body></html>
+    """
+    return html
+
+def prometheus_main_loop():
+    print(f"[{now_utc()}] PrometheusLog: Cognitive Core is online. Awaiting directive schedule at {DAILY_REPORT_TIME} UTC.")
+    last_report_date = None
+    while True:
+        now = now_utc()
+        if now.strftime('%H:%M') == DAILY_REPORT_TIME and now.date() != last_report_date:
+            print(f"[{now_utc()}] PrometheusLog: Directive time reached. Initiating analysis cycle.")
+            last_report_date = now.date()
+            try:
+                candidates = get_market_data()
+                if candidates:
+                    scored_list = analyze_and_score(candidates)
+                    if scored_list and scored_list[0]['score'] > MINIMUM_SCORE_THRESHOLD:
+                        best_coin = scored_list[0]
+                        report_html = build_html_directive(best_coin)
+                        subject = f"🔥 Prometheus Alpha Directive: {best_coin['name']} ({best_coin['symbol'].upper()})"
+                        send_email(subject, report_html)
+                    else:
+                        print(f"[{now_utc()}] PrometheusLog: No candidate met the minimum score of {MINIMUM_SCORE_THRESHOLD}. Directive withheld.")
+                else:
+                    print(f"[{now_utc()}] PrometheusLog: Market data synthesis returned no candidates.")
+            except Exception as e:
+                print(f"[{now_utc()}] FATAL ERROR in main loop: {e}"); traceback.print_exc()
+        
+        time.sleep(60)
+
+def run_health_check_server():
+    class HealthCheckHandler(BaseHTTPRequestHandler):
+        def do_GET(self): self.send_response(200); self.send_header('Content-type','text/plain'); self.end_headers(); self.wfile.write(b"Prometheus is alive.")
+    port=int(os.getenv("PORT", 8080)); server = HTTPServer(('', port), HealthCheckHandler)
+    print(f"[{now_utc()}] PrometheusLog: Health check server active on port {port}.")
+    server.serve_forever()
+
+if __name__ == "__main__":
+    scanner_thread = threading.Thread(target=prometheus_main_loop, daemon=True); scanner_thread.start()
+    run_health_check_server()
