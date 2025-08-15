@@ -1,0 +1,29 @@
+# This is the instruction map for Google Cloud Build.
+# It tells Cloud Build how to automatically deploy Project Prometheus.
+
+steps:
+  # Step 1: Build the container image using Docker.
+  # This is the "Build" phase.
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/project-prometheus:$COMMIT_SHA', '.']
+
+  # Step 2: Push the container image to Google Container Registry.
+  # This stores our newly built agent.
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/project-prometheus:$COMMIT_SHA']
+
+  # Step 3: Deploy the new container image to Google Cloud Run.
+  # This is the "Deploy" phase.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'project-prometheus' # The name of our service
+      - '--image=gcr.io/$PROJECT_ID/project-prometheus:$COMMIT_SHA'
+      - '--region=asia-southeast1' # IMPORTANT: Match your service's region
+      - '--platform=managed'
+      - '--quiet' # Suppress interactive prompts
+
+images:
+  - 'gcr.io/$PROJECT_ID/project-prometheus:$COMMIT_SHA'
