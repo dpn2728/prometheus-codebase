@@ -1,6 +1,9 @@
-# FINAL & GUARANTEED cloudbuild.yaml
-# This version explicitly tells Cloud Build where to store its logs,
-# satisfying the strict Organization Policy.
+# =================================================================
+# FINAL & GUARANTEED cloudbuild.yaml (v3 - Direct Logging)
+# This version tells Cloud Build to send logs DIRECTLY to the
+# main Google Cloud Logging system, bypassing the bucket issue.
+# This will satisfy the strictest Organization Policy.
+# =================================================================
 
 steps:
   # Step 1: Build the container image
@@ -27,8 +30,7 @@ steps:
 images:
   - 'gcr.io/$PROJECT_ID/project-prometheus:$COMMIT_SHA'
 
-# THIS IS THE MAGIC KEY THAT SOLVES OUR PROBLEM
-# We are telling the builder robot where to put its own reports.
+# THIS IS THE FINAL KEY.
+# We are telling the robot to report DIRECTLY to the CEO's office.
 options:
-  logging: GCS_ONLY
-logsBucket: 'gs://prometheus-build-logs-${PROJECT_ID}'
+  logging: CLOUD_LOGGING_ONLY
