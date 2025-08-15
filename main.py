@@ -6,14 +6,17 @@ from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from google.cloud import storage
 
+# --- Global Status & Configuration ---
 AGENT_STATUS = "INITIALIZING"
 PROJECT_ID = os.getenv("GCP_PROJECT", "project-nexus-final") 
 BUCKET_NAME = f"prometheus-data-library-{PROJECT_ID}"
 
+# --- Prometheus Core Configuration ---
 EMAIL_SENDER = os.getenv('EMAIL_SENDER')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
 EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER', EMAIL_SENDER)
 TIMEZONE_STR = os.getenv('TIMEZONE', 'UTC')
+# This is the final, victorious version.
 AGENT_VERSION = "v3.0 (Prometheus - Global Supremacy)"
 COINGECKO_API = 'https://api.coingecko.com/api/v3'
 DAILY_REPORT_TIME = "09:00"
@@ -98,28 +101,4 @@ def prometheus_main_loop():
                     if scored_list and scored_list[0]['score'] > MINIMUM_SCORE_THRESHOLD:
                         best_coin = scored_list[0]
                         AGENT_STATUS = f"Analysis complete. Best coin: {best_coin['name']}. Sending directive."
-                        report_html = build_html_directive(best_coin)
-                        subject = f"🔥 Prometheus Alpha Directive: {best_coin['name']}"
-                        send_email(subject, report_html)
-                    else:
-                        AGENT_STATUS = f"Analysis complete. No candidate met minimum score. Directive withheld."
-                else:
-                    AGENT_STATUS = "Analysis complete. No candidates from market data."
-            time.sleep(30)
-        except Exception as e:
-            AGENT_STATUS = f"FATAL ERROR in main loop: {e} at {now_utc().isoformat()}"
-            time.sleep(30)
-
-def run_health_check_server():
-    class HealthCheckHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200); self.send_header('Content-type','text/plain'); self.end_headers()
-            response_message = f"Prometheus Status: {AGENT_STATUS} | Version: {AGENT_VERSION}"
-            self.wfile.write(response_message.encode('utf-8'))
-    port=int(os.getenv("PORT", 8080)); server = HTTPServer(('', port), HealthCheckHandler)
-    server.serve_forever()
-
-if __name__ == "__main__":
-    scanner_thread = threading.Thread(target=prometheus_main_loop, daemon=True)
-    scanner_thread.start()
-    run_health_check_server()
+      
