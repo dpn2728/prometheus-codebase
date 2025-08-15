@@ -4,22 +4,17 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
-# This library is for writing to our GCS library.
 from google.cloud import storage
 
-# --- Global Status & Configuration ---
 AGENT_STATUS = "INITIALIZING"
-# We try to get the Project ID from the environment, which is standard in Google Cloud.
 PROJECT_ID = os.getenv("GCP_PROJECT", "project-nexus-final") 
 BUCKET_NAME = f"prometheus-data-library-{PROJECT_ID}"
 
-# --- Prometheus Core Configuration ---
 EMAIL_SENDER = os.getenv('EMAIL_SENDER')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
 EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER', EMAIL_SENDER)
 TIMEZONE_STR = os.getenv('TIMEZONE', 'UTC')
-# This final version name will verify our ultimate permission fix.
-AGENT_VERSION = "v2.5 (Prometheus - The King's Decree)"
+AGENT_VERSION = "v3.0 (Prometheus - Global Supremacy)"
 COINGECKO_API = 'https://api.coingecko.com/api/v3'
 DAILY_REPORT_TIME = "09:00"
 MAX_PRICE = 1.0
@@ -29,7 +24,6 @@ MINIMUM_SCORE_THRESHOLD = 50
 def now_utc(): return datetime.now(timezone.utc)
 
 def save_analysis_to_gcs(data):
-    """Saves the daily analysis result to Google Cloud Storage."""
     global AGENT_STATUS
     try:
         storage_client = storage.Client()
@@ -37,7 +31,6 @@ def save_analysis_to_gcs(data):
         today = now_utc().strftime('%Y-%m-%d')
         file_name = f"daily_analysis_{today}.json"
         blob = bucket.blob(file_name)
-        
         blob.upload_from_string(json.dumps(data, indent=2), content_type='application/json')
         print(f"[{now_utc()}] PrometheusLog: Successfully saved {file_name} to GCS.")
     except Exception as e:
@@ -101,7 +94,7 @@ def prometheus_main_loop():
                 candidates = get_market_data()
                 if candidates:
                     scored_list = analyze_and_score(candidates)
-                    save_analysis_to_gcs(scored_list) # Save the full analysis
+                    save_analysis_to_gcs(scored_list)
                     if scored_list and scored_list[0]['score'] > MINIMUM_SCORE_THRESHOLD:
                         best_coin = scored_list[0]
                         AGENT_STATUS = f"Analysis complete. Best coin: {best_coin['name']}. Sending directive."
