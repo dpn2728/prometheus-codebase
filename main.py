@@ -19,7 +19,7 @@ EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
 EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER', EMAIL_SENDER)
 TIMEZONE_STR = os.getenv('TIMEZONE', 'UTC')
 # This new version name will help us confirm our pipeline works.
-AGENT_VERSION = "v2.2 (Prometheus - Pipeline Verified)"
+AGENT_VERSION = "v2.3 (Prometheus - Pipeline Verified)"
 COINGECKO_API = 'https://api.coingecko.com/api/v3'
 DAILY_REPORT_TIME = "09:00"
 MAX_PRICE = 1.0
@@ -45,7 +45,6 @@ def save_analysis_to_gcs(data):
         print(f"[{now_utc()}] FATAL ERROR: Could not write to GCS bucket '{BUCKET_NAME}'. Error: {e}")
 
 def send_email(subject, html_body):
-    # This function remains the same.
     if not EMAIL_SENDER or not EMAIL_PASSWORD: return
     msg = MIMEMultipart('alternative'); msg['Subject'] = subject; msg['From'] = f"Project Prometheus <{EMAIL_SENDER}>"; msg['To'] = EMAIL_RECEIVER
     msg.attach(MIMEText(html_body, 'html', 'utf-8'))
@@ -55,7 +54,6 @@ def send_email(subject, html_body):
         global AGENT_STATUS; AGENT_STATUS = f"ERROR: Email failed at {now_utc().isoformat()}"
 
 def get_market_data():
-    # This function remains the same.
     try:
         params = {'vs_currency': 'usd', 'order': 'market_cap_desc', 'per_page': CANDIDATE_COUNT, 'page': 1}
         r = requests.get(f"{COINGECKO_API}/coins/markets", params=params, timeout=20); r.raise_for_status()
@@ -64,7 +62,6 @@ def get_market_data():
         global AGENT_STATUS; AGENT_STATUS = f"ERROR: CoinGecko fetch failed at {now_utc().isoformat()}"; return []
 
 def analyze_social_sentiment(symbol, name):
-    # This function remains the same.
     try:
         query = f'"{name}" OR "{symbol}"'; after = int((now_utc() - timedelta(days=1)).timestamp())
         r = requests.get(f'https://api.pushshift.io/reddit/search/comment/?q={query}&after={after}&size=0&metadata=true', timeout=15)
@@ -72,7 +69,6 @@ def analyze_social_sentiment(symbol, name):
     except Exception: return 0
 
 def analyze_and_score(candidates):
-    # This function remains the same.
     scored_coins = []
     for coin in candidates:
         sentiment = analyze_social_sentiment(coin.get('symbol',''), coin.get('name',''))
@@ -84,7 +80,6 @@ def analyze_and_score(candidates):
     return sorted(scored_coins, key=lambda x: x['score'], reverse=True)
 
 def build_html_directive(coin):
-    # This function remains the same.
     try: local_tz = pytz.timezone(TIMEZONE_STR)
     except Exception: local_tz = pytz.timezone('UTC')
     local_time = now_utc().astimezone(local_tz).strftime('%Y-%m-%d %H:%M:%S %Z')
@@ -126,7 +121,7 @@ def run_health_check_server():
     class HealthCheckHandler(BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200); self.send_header('Content-type','text/plain'); self.end_headers()
-            response_message = f"Prometheus Status: {AGENT_STATUS}"
+            response_message = f"Prometheus Status: {AGENT_STATUS} | Version: {AGENT_VERSION}"
             self.wfile.write(response_message.encode('utf-8'))
     port=int(os.getenv("PORT", 8080)); server = HTTPServer(('', port), HealthCheckHandler)
     server.serve_forever()
